@@ -7,6 +7,7 @@ import { Database } from "./index/sqlite.js";
 import { Vault } from "./core/vault.js";
 import { Indexer } from "./index/indexer.js";
 import { loadConfig } from "./core/config.js";
+import { FileWatcher } from "./core/watcher.js";
 
 async function main() {
   const args = process.argv.slice(2);
@@ -44,6 +45,14 @@ async function main() {
   }
 
   const config = loadConfig(vaultPaths[0]);
+
+  if (config.index.watchMode) {
+    for (let i = 0; i < vaults.length; i++) {
+      const watcher = new FileWatcher(vaults[i], indexers[i], config.index.excludePaths, quiet);
+      watcher.start();
+    }
+  }
+
   const server = createServer({ vaults, databases, indexers, config });
 
   const transport = new StdioServerTransport();
