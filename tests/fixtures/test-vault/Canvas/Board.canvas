@@ -1,0 +1,47 @@
+{
+  "nodes": [
+    {
+      "id": "node1",
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 250,
+      "height": 100,
+      "text": "# Start Here\n\nThis is the entry point."
+    },
+    {
+      "id": "node2",
+      "type": "text",
+      "x": 300,
+      "y": 0,
+      "width": 250,
+      "height": 100,
+      "text": "## Next Step\n\nDo this next."
+    },
+    {
+      "id": "node3",
+      "type": "file",
+      "x": 0,
+      "y": 200,
+      "width": 250,
+      "height": 100,
+      "file": "Projects/Alpha.md"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge1",
+      "fromNode": "node1",
+      "toNode": "node2",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "edge2",
+      "fromNode": "node1",
+      "toNode": "node3",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ]
+}
