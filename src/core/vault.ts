@@ -4,22 +4,27 @@ import type { Config } from "./types.js";
 import { DEFAULT_CONFIG } from "./config.js";
 
 export class Vault {
-  private rootPath: string;
+  private _rootPath: string;
   private config: Config;
   // Maps lowercase basename (without extension) -> relative path
   private fileIndex: Map<string, string> = new Map();
 
   constructor(rootPath: string, config?: Config) {
-    this.rootPath = rootPath;
+    this._rootPath = rootPath;
     this.config = config ?? DEFAULT_CONFIG;
     this.refreshIndex();
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
+  /** The absolute root path of this vault. */
+  get rootPath(): string {
+    return this._rootPath;
+  }
+
   /** Recursively list all files, excluding configured paths / patterns. */
   listAllFiles(): string[] {
-    return this._walk(this.rootPath, "");
+    return this._walk(this._rootPath, "");
   }
 
   /** List only .md files. */
@@ -94,13 +99,13 @@ export class Vault {
 
   /** Return the absolute path for a relative vault path. */
   getAbsolutePath(relativePath: string): string {
-    return path.join(this.rootPath, relativePath);
+    return path.join(this._rootPath, relativePath);
   }
 
   /** Rebuild the internal basename → relative-path index. */
   refreshIndex(): void {
     this.fileIndex = new Map();
-    const files = this._walk(this.rootPath, "");
+    const files = this._walk(this._rootPath, "");
     for (const rel of files) {
       if (rel.endsWith(".md")) {
         // Key is lowercase basename without the .md extension

@@ -51,10 +51,10 @@ export function loadConfig(vaultPath: string, overrides?: Record<string, unknown
     fileConfig = JSON.parse(raw);
   }
 
-  let config = deepMerge(DEFAULT_CONFIG, fileConfig);
+  let config = deepMerge(DEFAULT_CONFIG as unknown as Record<string, unknown>, fileConfig);
   if (overrides) {
     config = deepMerge(config, overrides);
   }
 
-  return config;
+  return config as unknown as Config;
 }
