@@ -393,5 +393,102 @@ export function createServer(ctx: ServerContext): McpServer {
     },
   );
 
+  // ── Graph tools ────────────────────────────────────────────────────────────
+
+  server.tool(
+    "get_backlinks",
+    "Find all notes that link to a given note. Returns source paths, link types, and line context.",
+    {
+      path: z.string().describe("Target note path (e.g. 'Projects/Alpha' or 'Projects/Alpha.md')"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: notePath, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const results = getBacklinks(d, v, notePath);
+      return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "get_outlinks",
+    "Find all notes linked from a given note. Returns target paths, resolved paths, link types, and line numbers.",
+    {
+      path: z.string().describe("Source note path (e.g. 'Welcome.md')"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: notePath, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const results = getOutlinks(d, v, notePath);
+      return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "get_graph",
+    "Build the full vault link graph (or a folder-scoped subgraph). Returns nodes and edges.",
+    {
+      folder: z.string().optional().describe("Restrict graph to notes inside this folder"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ folder, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const graph = getGraph(d, v, folder ? { folder } : undefined);
+      return { content: [{ type: "text", text: JSON.stringify(graph, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "find_path",
+    "Find the shortest link path between two notes using BFS. Returns an ordered list of note paths or null if unreachable.",
+    {
+      from: z.string().describe("Starting note path"),
+      to: z.string().describe("Target note path"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ from: fromPath, to: toPath, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const chain = findPath(d, v, fromPath, toPath);
+      return { content: [{ type: "text", text: JSON.stringify({ path: chain }, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "get_orphans",
+    "Find notes that have no inlinks, no outlinks, or both (fully isolated notes).",
+    {
+      mode: z
+        .enum(["both", "no-inlinks", "no-outlinks"])
+        .optional()
+        .describe("Orphan mode: 'both' (default) = no inlinks AND no outlinks; 'no-inlinks' = nothing links to them; 'no-outlinks' = they link to nothing"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ mode, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const orphans = getOrphans(d, v, mode);
+      return { content: [{ type: "text", text: JSON.stringify(orphans, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "get_neighbors",
+    "Get a subgraph of all notes within N hops of a starting note, including their interconnecting edges.",
+    {
+      path: z.string().describe("Starting note path"),
+      depth: z.number().int().min(1).describe("Number of hops from the starting note"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: notePath, depth, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const subgraph = getNeighbors(d, v, notePath, depth);
+      return { content: [{ type: "text", text: JSON.stringify(subgraph, null, 2) }] };
+    },
+  );
+
   return server;
 }
