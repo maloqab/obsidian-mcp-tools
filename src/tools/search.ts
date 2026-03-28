@@ -1,6 +1,7 @@
 import { Vault } from "../core/vault.js";
 import { Database, NoteRow } from "../index/sqlite.js";
 import { HybridSearch, HybridResult, HybridSearchOptions } from "../index/hybrid.js";
+import { searchByVector } from "../index/embeddings.js";
 
 // ── searchVault ──────────────────────────────────────────────────────────────
 
@@ -257,19 +258,29 @@ export async function searchSimilar(
   const note = db.getNoteByPath(path);
   if (!note) return [];
 
-  // Check if any embeddings exist
-  const embeddingCount = (
-    db.raw
-      .prepare("SELECT COUNT(*) as cnt FROM embeddings WHERE note_id = ?")
-      .get(note.id) as { cnt: number }
-  ).cnt;
+  // Check if any embeddings exist for this note
+  const row = db.raw
+    .prepare("SELECT vector FROM embeddings WHERE note_id = ? LIMIT 1")
+    .get(note.id) as { vector: Buffer } | undefined;
 
-  if (embeddingCount === 0) {
-    // No embeddings available — return empty
+  if (!row) {
+    // No embeddings available for this note
     return [];
   }
 
-  // If embeddings existed, vector similarity search would go here.
-  // For now, return empty as no embedding provider is implemented.
-  return [];
+  // Convert stored buffer back to Float32Array
+  const noteVector = new Float32Array(
+    row.vector.buffer,
+    row.vector.byteOffset,
+    row.vector.byteLength / Float32Array.BYTES_PER_ELEMENT,
+  );
+
+  // Search for similar notes using the note's embedding
+  const results = searchByVector(db, noteVector, limit + 1);
+
+  // Filter out the source note itself and limit results
+  return results
+    .filter((r) => r.path !== path)
+    .slice(0, limit)
+    .map((r) => ({ path: r.path, score: r.score }));
 }
