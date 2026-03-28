@@ -11,6 +11,7 @@ import { readNote, createNote, editNote, deleteNote, moveNote, splitNote, mergeN
 import { searchVault, searchReplace, searchByDate, searchByFrontmatter, searchSimilar } from "./tools/search.js";
 import { getBacklinks, getOutlinks, getGraph, findPath, getOrphans, getNeighbors } from "./tools/graph.js";
 import { listTags, addTag, removeTag, renameTag, mergeTags } from "./tools/tags.js";
+import { getFrontmatter, setFrontmatter, deleteFrontmatter, frontmatterSchema } from "./tools/frontmatter.js";
 import type { Config } from "./core/types.js";
 import fs from "fs";
 import path from "path";
@@ -577,6 +578,73 @@ export function createServer(ctx: ServerContext): McpServer {
           },
         ],
       };
+    },
+  );
+
+  // ── Frontmatter tools ──────────────────────────────────────────────────────
+
+  server.tool(
+    "get_frontmatter",
+    "Read a note's YAML frontmatter. Optionally filter to specific keys only.",
+    {
+      path: z.string().describe("Relative path to the note (e.g. 'Projects/Alpha.md')"),
+      keys: z
+        .array(z.string())
+        .optional()
+        .describe("If provided, return only these frontmatter keys"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: notePath, keys, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const fm = getFrontmatter(v, { path: notePath, keys });
+      return { content: [{ type: "text", text: JSON.stringify(fm, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "set_frontmatter",
+    "Merge new key/value pairs into a note's YAML frontmatter. Existing keys not in data are preserved.",
+    {
+      path: z.string().describe("Relative path to the note"),
+      data: z
+        .record(z.unknown())
+        .describe("Key/value pairs to set or update in frontmatter"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: notePath, data, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const idx = ctx.indexers[vaultIdx ?? 0] ?? defaultIndexer;
+      setFrontmatter(v, idx, { path: notePath, data: data as Record<string, unknown> });
+      return { content: [{ type: "text", text: `Updated frontmatter in: ${notePath}` }] };
+    },
+  );
+
+  server.tool(
+    "delete_frontmatter",
+    "Remove specific keys from a note's YAML frontmatter. All other frontmatter and body content is preserved.",
+    {
+      path: z.string().describe("Relative path to the note"),
+      keys: z.array(z.string()).describe("Frontmatter keys to remove"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: notePath, keys, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const idx = ctx.indexers[vaultIdx ?? 0] ?? defaultIndexer;
+      deleteFrontmatter(v, idx, { path: notePath, keys });
+      return { content: [{ type: "text", text: `Deleted frontmatter keys [${keys.join(", ")}] from: ${notePath}` }] };
+    },
+  );
+
+  server.tool(
+    "frontmatter_schema",
+    "Aggregate all frontmatter keys across the vault. Returns each key's occurrence count, observed types, and sample values.",
+    {
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ vault: vaultIdx }) => {
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const schema = frontmatterSchema(d);
+      return { content: [{ type: "text", text: JSON.stringify(schema, null, 2) }] };
     },
   );
 
