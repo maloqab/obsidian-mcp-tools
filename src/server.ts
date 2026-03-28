@@ -14,6 +14,7 @@ import { listTags, addTag, removeTag, renameTag, mergeTags } from "./tools/tags.
 import { getFrontmatter, setFrontmatter, deleteFrontmatter, frontmatterSchema } from "./tools/frontmatter.js";
 import { readCanvas, createCanvas, editCanvas, canvasToNotes } from "./tools/canvas.js";
 import { listTemplates, applyTemplate, createTemplate } from "./tools/templates.js";
+import { dataviewQuery, dataviewFields, dataviewEval } from "./tools/dataview/tools.js";
 import type { Config } from "./core/types.js";
 import fs from "fs";
 import path from "path";
@@ -849,6 +850,52 @@ export function createServer(ctx: ServerContext): McpServer {
           },
         ],
       };
+    },
+  );
+
+  // ── Dataview tools ──────────────────────────────────────────────────────────
+
+  server.tool(
+    "dataview_query",
+    "Execute a Dataview Query Language (DQL) query against the vault index. Supports TABLE, LIST, TASK, and CALENDAR query types with FROM, WHERE, SORT, GROUP BY, FLATTEN, and LIMIT clauses.",
+    {
+      query: z.string().describe("DQL query string (e.g. 'TABLE file.name, status FROM #project WHERE status = \"active\"')"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ query, vault: vaultIdx }) => {
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const result = dataviewQuery(d, v, { query });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "dataview_fields",
+    "List all inline fields (key:: value) used across the vault, with usage counts, value types, and examples. Useful for discovering available metadata fields.",
+    {
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ vault: vaultIdx }) => {
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const fields = dataviewFields(d);
+      return { content: [{ type: "text", text: JSON.stringify(fields, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "dataview_eval",
+    "Evaluate a single Dataview expression in the context of a specific note. Useful for testing expressions or extracting a computed value from one note.",
+    {
+      expression: z.string().describe("DQL expression to evaluate (e.g. 'file.name', 'contains(file.tags, \"project\")', 'rating + 1')"),
+      notePath: z.string().describe("Relative path to the note providing context (e.g. 'Projects/Alpha.md')"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ expression, notePath, vault: vaultIdx }) => {
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const result = dataviewEval(d, v, { expression, notePath });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     },
   );
 
