@@ -12,6 +12,8 @@ import { searchVault, searchReplace, searchByDate, searchByFrontmatter, searchSi
 import { getBacklinks, getOutlinks, getGraph, findPath, getOrphans, getNeighbors } from "./tools/graph.js";
 import { listTags, addTag, removeTag, renameTag, mergeTags } from "./tools/tags.js";
 import { getFrontmatter, setFrontmatter, deleteFrontmatter, frontmatterSchema } from "./tools/frontmatter.js";
+import { readCanvas, createCanvas, editCanvas, canvasToNotes } from "./tools/canvas.js";
+import { listTemplates, applyTemplate, createTemplate } from "./tools/templates.js";
 import type { Config } from "./core/types.js";
 import fs from "fs";
 import path from "path";
@@ -645,6 +647,208 @@ export function createServer(ctx: ServerContext): McpServer {
       const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
       const schema = frontmatterSchema(d);
       return { content: [{ type: "text", text: JSON.stringify(schema, null, 2) }] };
+    },
+  );
+
+  // ── Template tools ─────────────────────────────────────────────────────────
+
+  server.tool(
+    "list_templates",
+    "List all available templates in the configured templates folder. Returns relative vault paths.",
+    {
+      templateFolder: z
+        .string()
+        .optional()
+        .describe("Folder to list templates from (default: 'Templates')"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ templateFolder, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const folder = templateFolder ?? ctx.config.templates?.folder ?? "Templates";
+      const templates = listTemplates(v, folder);
+      return { content: [{ type: "text", text: JSON.stringify(templates, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "apply_template",
+    "Apply a template to create a new note. Replaces {{key}} placeholders with supplied variables. Auto-variables: {{date}} (today YYYY-MM-DD), {{time}} (HH:MM), {{title}} (filename without .md).",
+    {
+      template: z.string().describe("Relative path to the template file (e.g. 'Templates/Project Template.md')"),
+      targetPath: z.string().describe("Relative path for the new note to create (e.g. 'Projects/My Project.md')"),
+      variables: z
+        .record(z.string())
+        .optional()
+        .describe("Key/value pairs to substitute for {{key}} placeholders in the template"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ template, targetPath, variables, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const idx = ctx.indexers[vaultIdx ?? 0] ?? defaultIndexer;
+      applyTemplate(v, idx, { template, targetPath, variables: variables ?? {} });
+      return { content: [{ type: "text", text: `Created from template: ${targetPath}` }] };
+    },
+  );
+
+  server.tool(
+    "create_template",
+    "Create a new template file. Use {{key}} syntax for variable placeholders.",
+    {
+      path: z.string().describe("Relative path for the template (e.g. 'Templates/My Template.md')"),
+      content: z.string().describe("Template content with optional {{key}} placeholders"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: templatePath, content, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      createTemplate(v, { path: templatePath, content });
+      return { content: [{ type: "text", text: `Template created: ${templatePath}` }] };
+    },
+  );
+
+  // ── Canvas tools ────────────────────────────────────────────────────────────
+
+  server.tool(
+    "read_canvas",
+    "Read a canvas file (.canvas) and return its nodes and edges as structured JSON",
+    {
+      path: z.string().describe("Relative path to the canvas file (e.g. 'Canvas/Board.canvas')"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: canvasPath, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const canvas = readCanvas(v, { path: canvasPath });
+      return { content: [{ type: "text", text: JSON.stringify(canvas, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "create_canvas",
+    "Create a new canvas file with the given nodes and edges",
+    {
+      path: z.string().describe("Relative path for the new canvas file (e.g. 'Canvas/New.canvas')"),
+      nodes: z
+        .array(
+          z.object({
+            id: z.string(),
+            type: z.enum(["text", "file", "link", "group"]),
+            x: z.number(),
+            y: z.number(),
+            width: z.number(),
+            height: z.number(),
+            text: z.string().optional(),
+            file: z.string().optional(),
+            url: z.string().optional(),
+            label: z.string().optional(),
+          })
+        )
+        .describe("Array of canvas nodes"),
+      edges: z
+        .array(
+          z.object({
+            id: z.string(),
+            fromNode: z.string(),
+            toNode: z.string(),
+            fromSide: z.string().optional(),
+            toSide: z.string().optional(),
+            label: z.string().optional(),
+          })
+        )
+        .describe("Array of canvas edges"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: canvasPath, nodes, edges, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      createCanvas(v, { path: canvasPath, nodes, edges });
+      return { content: [{ type: "text", text: `Created canvas: ${canvasPath}` }] };
+    },
+  );
+
+  server.tool(
+    "edit_canvas",
+    "Edit a canvas file: add/remove nodes and edges, or update existing nodes",
+    {
+      path: z.string().describe("Relative path to the canvas file"),
+      addNodes: z
+        .array(
+          z.object({
+            id: z.string(),
+            type: z.enum(["text", "file", "link", "group"]),
+            x: z.number(),
+            y: z.number(),
+            width: z.number(),
+            height: z.number(),
+            text: z.string().optional(),
+            file: z.string().optional(),
+            url: z.string().optional(),
+            label: z.string().optional(),
+          })
+        )
+        .optional()
+        .describe("Nodes to add"),
+      removeNodeIds: z
+        .array(z.string())
+        .optional()
+        .describe("IDs of nodes to remove (connected edges are also removed)"),
+      addEdges: z
+        .array(
+          z.object({
+            id: z.string(),
+            fromNode: z.string(),
+            toNode: z.string(),
+            fromSide: z.string().optional(),
+            toSide: z.string().optional(),
+            label: z.string().optional(),
+          })
+        )
+        .optional()
+        .describe("Edges to add"),
+      removeEdgeIds: z.array(z.string()).optional().describe("IDs of edges to remove"),
+      updateNodes: z
+        .array(
+          z.object({
+            id: z.string(),
+            type: z.enum(["text", "file", "link", "group"]),
+            x: z.number(),
+            y: z.number(),
+            width: z.number(),
+            height: z.number(),
+            text: z.string().optional(),
+            file: z.string().optional(),
+            url: z.string().optional(),
+            label: z.string().optional(),
+          })
+        )
+        .optional()
+        .describe("Nodes to update (matched by id, fully replaced)"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: canvasPath, addNodes, removeNodeIds, addEdges, removeEdgeIds, updateNodes, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      editCanvas(v, { path: canvasPath, addNodes, removeNodeIds, addEdges, removeEdgeIds, updateNodes });
+      return { content: [{ type: "text", text: `Edited canvas: ${canvasPath}` }] };
+    },
+  );
+
+  server.tool(
+    "canvas_to_notes",
+    "Extract text nodes from a canvas file into individual markdown notes in an output folder",
+    {
+      path: z.string().describe("Relative path to the canvas file"),
+      outputFolder: z.string().describe("Folder to write extracted notes into (e.g. 'Canvas/Extracted')"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: canvasPath, outputFolder, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const idx = ctx.indexers[vaultIdx ?? 0] ?? defaultIndexer;
+      const created = canvasToNotes(v, idx, { path: canvasPath, outputFolder });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ created }, null, 2),
+          },
+        ],
+      };
     },
   );
 
