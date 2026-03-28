@@ -3,8 +3,13 @@ import { z } from "zod";
 import { Database } from "./index/sqlite.js";
 import { Vault } from "./core/vault.js";
 import { Indexer } from "./index/indexer.js";
+import { FtsIndex } from "./index/fts.js";
+import { TrigramIndex } from "./index/trigram.js";
+import { HybridSearch } from "./index/hybrid.js";
 import { vaultStats, listFiles } from "./tools/vault.js";
 import { readNote, createNote, editNote, deleteNote, moveNote, splitNote, mergeNotes, duplicateNote } from "./tools/notes.js";
+import { searchVault, searchReplace, searchByDate, searchByFrontmatter, searchSimilar } from "./tools/search.js";
+import { getBacklinks, getOutlinks, getGraph, findPath, getOrphans, getNeighbors } from "./tools/graph.js";
 import type { Config } from "./core/types.js";
 import fs from "fs";
 import path from "path";
@@ -25,6 +30,11 @@ export function createServer(ctx: ServerContext): McpServer {
   const defaultVault = ctx.vaults[0];
   const defaultDb = ctx.databases[0];
   const defaultIndexer = ctx.indexers[0];
+
+  const fts = new FtsIndex(defaultDb);
+  const trigram = new TrigramIndex(defaultDb);
+  trigram.buildIndex();
+  const hybrid = new HybridSearch(fts, trigram, null);
 
   server.tool(
     "vault_stats",
@@ -271,6 +281,116 @@ export function createServer(ctx: ServerContext): McpServer {
       duplicateNote(v, idx, { path: notePath, newPath });
       return { content: [{ type: "text", text: `Duplicated: ${notePath} → ${newPath}` }] };
     }
+  );
+
+  // ── Search tools ───────────────────────────────────────────────────────────
+
+  server.tool(
+    "search_vault",
+    "Search notes using hybrid full-text and trigram search. Returns ranked results with optional snippets.",
+    {
+      query: z.string().describe("Search query"),
+      mode: z
+        .enum(["hybrid", "fts", "trigram", "semantic"])
+        .optional()
+        .describe("Search mode (default: hybrid)"),
+      limit: z.number().optional().describe("Maximum results to return (default: 50)"),
+      filterPaths: z
+        .array(z.string())
+        .optional()
+        .describe("Restrict search to these note paths"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ query, mode, limit, filterPaths, vault: vaultIdx }) => {
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      let searchHybrid = hybrid;
+      if (vaultIdx && vaultIdx !== 0) {
+        const vFts = new FtsIndex(d);
+        const vTrigram = new TrigramIndex(d);
+        vTrigram.buildIndex();
+        searchHybrid = new HybridSearch(vFts, vTrigram, null);
+      }
+      const results = await searchVault(searchHybrid, { query, mode, limit, filterPaths });
+      return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "search_replace",
+    "Find and replace text across all notes in the vault. Supports plain text and regex patterns.",
+    {
+      search: z.string().describe("Text or regex pattern to search for"),
+      replace: z.string().describe("Replacement text"),
+      regex: z.boolean().optional().describe("Treat search as a regular expression (default: false)"),
+      preview: z
+        .boolean()
+        .optional()
+        .describe("Preview matches without applying changes (default: false)"),
+      paths: z
+        .array(z.string())
+        .optional()
+        .describe("Restrict search/replace to these note paths"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ search, replace, regex, preview, paths, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const matches = searchReplace(v, d, { search, replace, regex, preview, paths });
+      return { content: [{ type: "text", text: JSON.stringify(matches, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "search_by_date",
+    "Find notes filtered by creation or modification date. Dates should be ISO 8601 strings.",
+    {
+      after: z.string().optional().describe("Return notes after this date (ISO 8601)"),
+      before: z.string().optional().describe("Return notes before this date (ISO 8601)"),
+      field: z
+        .enum(["created", "modified"])
+        .optional()
+        .describe("Date field to filter on (default: modified)"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ after, before, field, vault: vaultIdx }) => {
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const results = searchByDate(d, { after, before, field });
+      return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "search_by_frontmatter",
+    "Find notes by a frontmatter field value. Can check for field existence or match a specific value.",
+    {
+      field: z.string().describe("Frontmatter field name (e.g. 'status', 'tags')"),
+      value: z.string().optional().describe("Match notes where the field equals this value"),
+      exists: z
+        .boolean()
+        .optional()
+        .describe("true = field must exist, false = field must not exist"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ field, value, exists, vault: vaultIdx }) => {
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const results = searchByFrontmatter(d, { field, value, exists });
+      return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "search_similar",
+    "Find notes semantically similar to a given note using vector embeddings. Returns empty results if no embeddings are indexed.",
+    {
+      path: z.string().describe("Relative path of the reference note"),
+      limit: z.number().optional().describe("Maximum number of similar notes to return (default: 10)"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: notePath, limit, vault: vaultIdx }) => {
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const results = await searchSimilar(d, { path: notePath, limit });
+      return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+    },
   );
 
   return server;
