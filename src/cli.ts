@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import fs from "fs";
 import path from "path";
 import { createServer } from "./server.js";
 import { Database } from "./index/sqlite.js";
@@ -8,6 +9,25 @@ import { Vault } from "./core/vault.js";
 import { Indexer } from "./index/indexer.js";
 import { loadConfig } from "./core/config.js";
 import { FileWatcher } from "./core/watcher.js";
+
+const DB_FILENAME = ".obsidian-mcp-tools.db";
+
+function ensureGitignore(vaultPath: string): void {
+  const gitignorePath = path.join(vaultPath, ".gitignore");
+  try {
+    if (fs.existsSync(gitignorePath)) {
+      const contents = fs.readFileSync(gitignorePath, "utf8");
+      const lines = contents.split("\n").map((l) => l.trim());
+      if (lines.includes(DB_FILENAME)) return;
+      const separator = contents.endsWith("\n") ? "" : "\n";
+      fs.appendFileSync(gitignorePath, `${separator}${DB_FILENAME}\n`, "utf8");
+    } else {
+      fs.writeFileSync(gitignorePath, `${DB_FILENAME}\n`, "utf8");
+    }
+  } catch {
+    // Non-fatal: silently skip if the vault root is not writable
+  }
+}
 
 async function main() {
   const args = process.argv.slice(2);
@@ -31,8 +51,9 @@ async function main() {
     const resolved = path.resolve(vaultPath);
     const config = loadConfig(resolved);
     const vault = new Vault(resolved, config);
-    const dbPath = path.join(resolved, ".obsidian-mcp-tools.db");
+    const dbPath = path.join(resolved, DB_FILENAME);
     const db = new Database(dbPath);
+    ensureGitignore(resolved);
     const indexer = new Indexer(db, vault);
 
     log(`Indexing vault: ${resolved}`);
