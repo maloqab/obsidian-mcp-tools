@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Database } from "../../src/index/sqlite.js";
 import { Vault } from "../../src/core/vault.js";
 import { Indexer } from "../../src/index/indexer.js";
-import { readNote, createNote, editNote, deleteNote } from "../../src/tools/notes.js";
+import { readNote, createNote, editNote, deleteNote, moveNote, splitNote, mergeNotes, duplicateNote } from "../../src/tools/notes.js";
 import fs from "fs";
 import path from "path";
 
@@ -108,6 +108,68 @@ describe("note tools", () => {
       deleteNote(vault, indexer, db, { path: "Orphan.md", trash: true, trashFolder: ".trash" });
       expect(vault.exists("Orphan.md")).toBe(false);
       expect(vault.exists(".trash/Orphan.md")).toBe(true);
+    });
+  });
+
+  describe("moveNote", () => {
+    it("moves a note and updates backlinks", () => {
+      moveNote(vault, indexer, db, {
+        path: "Projects/Alpha.md",
+        newPath: "Archive/Alpha.md",
+        updateLinks: true,
+      });
+      expect(vault.exists("Archive/Alpha.md")).toBe(true);
+      expect(vault.exists("Projects/Alpha.md")).toBe(false);
+      const betaContent = vault.readFile("Projects/Beta.md");
+      expect(betaContent).toContain("[[Archive/Alpha]]");
+    });
+
+    it("moves without updating links when disabled", () => {
+      moveNote(vault, indexer, db, {
+        path: "Projects/Alpha.md",
+        newPath: "Archive/Alpha.md",
+        updateLinks: false,
+      });
+      const betaContent = vault.readFile("Projects/Beta.md");
+      expect(betaContent).toContain("[[Projects/Alpha]]");
+    });
+  });
+
+  describe("splitNote", () => {
+    it("splits a note by headings", () => {
+      const created = splitNote(vault, indexer, {
+        path: "Projects/Alpha.md",
+        byHeadingLevel: 2,
+      });
+      expect(created.length).toBeGreaterThan(1);
+      expect(created.some((p) => p.includes("Tasks"))).toBe(true);
+      expect(created.some((p) => p.includes("Notes"))).toBe(true);
+    });
+  });
+
+  describe("mergeNotes", () => {
+    it("merges multiple notes into one", () => {
+      mergeNotes(vault, indexer, {
+        paths: ["Projects/Alpha.md", "Projects/Beta.md"],
+        targetPath: "Projects/Merged.md",
+        deleteOriginals: false,
+      });
+      expect(vault.exists("Projects/Merged.md")).toBe(true);
+      const content = vault.readFile("Projects/Merged.md");
+      expect(content).toContain("Project Alpha");
+      expect(content).toContain("Project Beta");
+    });
+  });
+
+  describe("duplicateNote", () => {
+    it("copies a note with a new name", () => {
+      duplicateNote(vault, indexer, {
+        path: "Welcome.md",
+        newPath: "Welcome Copy.md",
+      });
+      expect(vault.exists("Welcome Copy.md")).toBe(true);
+      expect(vault.exists("Welcome.md")).toBe(true);
+      expect(vault.readFile("Welcome Copy.md")).toContain("Welcome to the Vault");
     });
   });
 });
