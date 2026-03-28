@@ -39,7 +39,7 @@ export function createServer(ctx: ServerContext): McpServer {
   const fts = new FtsIndex(defaultDb);
   const trigram = new TrigramIndex(defaultDb);
   trigram.buildIndex();
-  const hybrid = new HybridSearch(fts, trigram, null);
+  const hybrid = new HybridSearch(fts, trigram, null, defaultDb);
 
   server.tool(
     "vault_stats",
@@ -313,7 +313,7 @@ export function createServer(ctx: ServerContext): McpServer {
         const vFts = new FtsIndex(d);
         const vTrigram = new TrigramIndex(d);
         vTrigram.buildIndex();
-        searchHybrid = new HybridSearch(vFts, vTrigram, null);
+        searchHybrid = new HybridSearch(vFts, vTrigram, null, d);
       }
       const results = await searchVault(searchHybrid, { query, mode, limit, filterPaths });
       return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };

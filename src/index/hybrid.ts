@@ -1,9 +1,10 @@
 import { FtsIndex, FtsResult } from "./fts.js";
 import { TrigramIndex, TrigramResult } from "./trigram.js";
+import { searchByVector } from "./embeddings.js";
+import type { EmbeddingProvider } from "./embeddings.js";
+import type { Database } from "./sqlite.js";
 
-export interface EmbeddingProvider {
-  embed(text: string): Promise<Float32Array>;
-}
+export type { EmbeddingProvider } from "./embeddings.js";
 
 export interface HybridResult {
   noteId: number;
@@ -48,15 +49,18 @@ export class HybridSearch {
   private fts: FtsIndex;
   private trigram: TrigramIndex;
   private vector: EmbeddingProvider | null;
+  private db: Database | null;
 
   constructor(
     fts: FtsIndex,
     trigram: TrigramIndex,
     vector: EmbeddingProvider | null,
+    db?: Database,
   ) {
     this.fts = fts;
     this.trigram = trigram;
     this.vector = vector;
+    this.db = db ?? null;
   }
 
   async search(
@@ -121,10 +125,18 @@ export class HybridSearch {
       }
     }
 
-    // Vector layer (skip if provider is null)
-    if ((mode === "hybrid" || mode === "semantic") && this.vector !== null) {
+    // Vector layer (skip if provider is null or db is null)
+    if ((mode === "hybrid" || mode === "semantic") && this.vector !== null && this.db !== null) {
       if (weights.vector > 0) {
-        // Vector search is not yet implemented; handled gracefully
+        const queryVector = await this.vector.embed(query);
+        const vecResults = searchByVector(this.db, queryVector, limit * 2);
+        // Convert cosine similarity [-1,1] to [0,1] range before normalization
+        const adjusted = vecResults.map((r) => ({
+          ...r,
+          score: (r.score + 1) / 2,
+        }));
+        const vecNorm = normalizeScores(adjusted);
+        applyResults(vecNorm, weights.vector);
       }
     }
 
