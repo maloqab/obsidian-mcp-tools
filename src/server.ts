@@ -4,7 +4,7 @@ import { Database } from "./index/sqlite.js";
 import { Vault } from "./core/vault.js";
 import { Indexer } from "./index/indexer.js";
 import { vaultStats, listFiles } from "./tools/vault.js";
-import { readNote, createNote, editNote, deleteNote } from "./tools/notes.js";
+import { readNote, createNote, editNote, deleteNote, moveNote, splitNote, mergeNotes, duplicateNote } from "./tools/notes.js";
 import type { Config } from "./core/types.js";
 import fs from "fs";
 import path from "path";
@@ -183,6 +183,93 @@ export function createServer(ctx: ServerContext): McpServer {
       deleteNote(v, idx, d, { path: notePath, trash, trashFolder });
       const action = trash ? `moved to ${trashFolder ?? ".trash"}` : "deleted";
       return { content: [{ type: "text", text: `${notePath} ${action}` }] };
+    }
+  );
+
+  server.tool(
+    "move_note",
+    "Move or rename a note, optionally updating all wikilinks that reference the old path",
+    {
+      path: z.string().describe("Current relative path of the note"),
+      newPath: z.string().describe("New relative path for the note"),
+      updateLinks: z
+        .boolean()
+        .optional()
+        .describe("Update wikilinks in other notes pointing to the old path (default: true)"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: notePath, newPath, updateLinks, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const idx = ctx.indexers[vaultIdx ?? 0] ?? defaultIndexer;
+      moveNote(v, idx, d, { path: notePath, newPath, updateLinks });
+      return { content: [{ type: "text", text: `Moved: ${notePath} → ${newPath}` }] };
+    }
+  );
+
+  server.tool(
+    "split_note",
+    "Split a note into multiple notes, one per heading at the specified level",
+    {
+      path: z.string().describe("Relative path of the note to split"),
+      byHeadingLevel: z
+        .number()
+        .int()
+        .min(1)
+        .max(6)
+        .describe("Heading level to split on (1–6, e.g. 2 for ## headings)"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: notePath, byHeadingLevel, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const idx = ctx.indexers[vaultIdx ?? 0] ?? defaultIndexer;
+      const created = splitNote(v, idx, { path: notePath, byHeadingLevel });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ created }, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  server.tool(
+    "merge_notes",
+    "Merge multiple notes into a single target note, separated by horizontal rules",
+    {
+      paths: z
+        .array(z.string())
+        .describe("Ordered list of relative note paths to merge"),
+      targetPath: z.string().describe("Relative path for the merged output note"),
+      deleteOriginals: z
+        .boolean()
+        .optional()
+        .describe("Delete the source notes after merging (default: false)"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ paths, targetPath, deleteOriginals, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const idx = ctx.indexers[vaultIdx ?? 0] ?? defaultIndexer;
+      mergeNotes(v, idx, { paths, targetPath, deleteOriginals });
+      return { content: [{ type: "text", text: `Merged ${paths.length} notes into: ${targetPath}` }] };
+    }
+  );
+
+  server.tool(
+    "duplicate_note",
+    "Copy a note to a new path without modifying the original",
+    {
+      path: z.string().describe("Relative path of the note to duplicate"),
+      newPath: z.string().describe("Relative path for the new copy"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: notePath, newPath, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const idx = ctx.indexers[vaultIdx ?? 0] ?? defaultIndexer;
+      duplicateNote(v, idx, { path: notePath, newPath });
+      return { content: [{ type: "text", text: `Duplicated: ${notePath} → ${newPath}` }] };
     }
   );
 
