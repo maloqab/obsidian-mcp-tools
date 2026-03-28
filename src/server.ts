@@ -10,6 +10,7 @@ import { vaultStats, listFiles } from "./tools/vault.js";
 import { readNote, createNote, editNote, deleteNote, moveNote, splitNote, mergeNotes, duplicateNote } from "./tools/notes.js";
 import { searchVault, searchReplace, searchByDate, searchByFrontmatter, searchSimilar } from "./tools/search.js";
 import { getBacklinks, getOutlinks, getGraph, findPath, getOrphans, getNeighbors } from "./tools/graph.js";
+import { listTags, addTag, removeTag, renameTag, mergeTags } from "./tools/tags.js";
 import type { Config } from "./core/types.js";
 import fs from "fs";
 import path from "path";
@@ -487,6 +488,95 @@ export function createServer(ctx: ServerContext): McpServer {
       const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
       const subgraph = getNeighbors(d, v, notePath, depth);
       return { content: [{ type: "text", text: JSON.stringify(subgraph, null, 2) }] };
+    },
+  );
+
+  // ── Tag tools ──────────────────────────────────────────────────────────────
+
+  server.tool(
+    "list_tags",
+    "List all tags in the vault with their usage counts, sorted by frequency",
+    { vault: z.number().optional().describe("Vault index (default: 0)") },
+    async ({ vault: vaultIdx }) => {
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const tags = listTags(d);
+      return { content: [{ type: "text", text: JSON.stringify(tags, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "add_tag",
+    "Add a tag to a note, either in the YAML frontmatter tags array or as an inline #tag",
+    {
+      path: z.string().describe("Relative path to the note"),
+      tag: z.string().describe("Tag name to add (without leading #)"),
+      location: z
+        .enum(["frontmatter", "inline"])
+        .describe("Where to add the tag: 'frontmatter' (YAML tags array) or 'inline' (appended as #tag)"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: notePath, tag, location, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const idx = ctx.indexers[vaultIdx ?? 0] ?? defaultIndexer;
+      addTag(v, idx, { path: notePath, tag, location });
+      return { content: [{ type: "text", text: `Added tag '${tag}' to ${notePath} (${location})` }] };
+    },
+  );
+
+  server.tool(
+    "remove_tag",
+    "Remove a tag from a note (from both frontmatter and inline occurrences)",
+    {
+      path: z.string().describe("Relative path to the note"),
+      tag: z.string().describe("Tag name to remove (without leading #)"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ path: notePath, tag, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const idx = ctx.indexers[vaultIdx ?? 0] ?? defaultIndexer;
+      removeTag(v, idx, { path: notePath, tag });
+      return { content: [{ type: "text", text: `Removed tag '${tag}' from ${notePath}` }] };
+    },
+  );
+
+  server.tool(
+    "rename_tag",
+    "Rename a tag across all notes in the vault (frontmatter and inline)",
+    {
+      oldTag: z.string().describe("Current tag name to rename"),
+      newTag: z.string().describe("New tag name"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ oldTag, newTag, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const idx = ctx.indexers[vaultIdx ?? 0] ?? defaultIndexer;
+      renameTag(v, idx, d, { oldTag, newTag });
+      return { content: [{ type: "text", text: `Renamed tag '${oldTag}' → '${newTag}' across vault` }] };
+    },
+  );
+
+  server.tool(
+    "merge_tags",
+    "Merge one or more source tags into a single target tag across all notes",
+    {
+      sourceTags: z.array(z.string()).describe("Tags to merge (will be replaced by targetTag)"),
+      targetTag: z.string().describe("Tag that all sourceTags will be renamed to"),
+      vault: z.number().optional().describe("Vault index (default: 0)"),
+    },
+    async ({ sourceTags, targetTag, vault: vaultIdx }) => {
+      const v = ctx.vaults[vaultIdx ?? 0] ?? defaultVault;
+      const d = ctx.databases[vaultIdx ?? 0] ?? defaultDb;
+      const idx = ctx.indexers[vaultIdx ?? 0] ?? defaultIndexer;
+      mergeTags(v, idx, d, { sourceTags, targetTag });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Merged tags [${sourceTags.join(", ")}] → '${targetTag}'`,
+          },
+        ],
+      };
     },
   );
 
