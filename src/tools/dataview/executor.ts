@@ -577,13 +577,13 @@ function applyFlatten(
     if (Array.isArray(val)) {
       for (const item of val) {
         // Create a copy of the context with the flattened value
-        const copy = { ...ctx, file: { ...ctx.file } };
+        const copy: NoteContext = { ...ctx, file: { ...ctx.file } };
         // Set the flattened field identifier to the item
         if (flatExpr.kind === "identifier") {
-          copy[flatExpr.name] = item;
+          (copy as Record<string, unknown>)[flatExpr.name] = item;
         } else if (flatExpr.kind === "fieldAccess") {
           // For field access like file.tags, we just add the individual item
-          copy[getExprName(flatExpr)] = item;
+          (copy as Record<string, unknown>)[getExprName(flatExpr)] = item;
         }
         result.push(copy);
       }
